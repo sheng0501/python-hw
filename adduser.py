@@ -65,30 +65,56 @@ parser.add_argument('-Z, --selinux-user', metavar='SEUSER',
 
 
 args = parser.parse_args()
-print(args.username)
-print(' '.join(sys.argv[1:]))
-print(sys.argv)
+
+# connection info
+config = paramiko.SSHConfig()
+config.parse(open(os.path.expanduser('~/.ssh/config')))
+conf = config.lookup(args.host)
+keyFile = conf['identityfile'][0]
+k = paramiko.RSAKey.from_private_key(open(keyFile))
+
+client = paramiko.SSHClient()
+client.load_host_keys(os.path.expanduser('~/.ssh/known_hosts'))
+
+client.connect(hostname=conf['hostname'], port=22,
+               pkey=k, username=conf['user'])
 
 useraddOptions = ' '.join([k+' '+v if type(v) is str else k for (k, v) in vars(args).items()
                            if v and not k in ['host', 'username', 'key']])
 
-
-config = paramiko.SSHConfig()
-config.parse(open(os.path.expanduser('~/.ssh/config')))
-conf = config.lookup(args.host)
-print(conf)
-keyFile = conf['identityfile'][0]
-k = paramiko.RSAKey.from_private_key(open(keyFile))
-# print(k)
-client = paramiko.SSHClient()
-client.load_host_keys(os.path.expanduser('~/.ssh/known_hosts'))
-print(args.host)
-client.connect(hostname=conf['hostname'], port=22,
-               pkey=k, username=conf['user'])
-stdin, stdout, stderr = client.exec_command(
+# assuming user has sudo permission
+_, stdout, stderr = client.exec_command(
     'sudo /usr/sbin/useradd ' + args.username + ' ' + useraddOptions)
+
 exit_status = stdout.channel.recv_exit_status()
 if exit_status != 0:
     print(stderr.read().decode('utf-8'))
+    sys.exit(-1)
+    client.close()
 
+# get home directory so we can upload ssh public key
+_, stdout, stderr = client.exec_command('eval echo ~'+args.username)
+exit_status = stdout.channel.recv_exit_status()
+if exit_status != 0:
+    print(stderr.read().decode('utf-8'))
+    sys.exit(-1)
+    client.close()
+userHome = stdout.read().decode('utf-8').strip()
+
+# upload ssh pubilc key
+if args.key:
+    # _, stdout, stderr = client.exec_command('eval echo ~'+args.username)
+    # exit_status = stdout.channel.recv_exit_status()
+    # if exit_status != 0:
+    #     print(stderr.read().decode('utf-8'))
+    #     sys.exit(-1)
+    #     client.close()
+
+    sftp = client.open_sftp()
+    sftp.mkdir(userHome + '/.ssh')
+    sftp.chdir(userHome + '/.ssh')
+    sftp.put(args.key, 'authorized')
+
+print('hi')
 client.close()
+sys.exit(0)
