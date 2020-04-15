@@ -40,4 +40,5 @@ while l:
     print('{:<32s}{:<8s}{:<s}'.format(fields[0], fields[2], fields[4]))
     l = results.readline()
 
+client.close()
 sys.exit(0)
