@@ -82,24 +82,23 @@ client.connect(hostname=conf['hostname'], port=22,
 useraddOptions = ' '.join([k+' '+v if type(v) is str else k for (k, v) in vars(args).items()
                            if v and not k in ['host', 'username', 'key']])
 
-# assuming user has sudo permission
-_, stdout, stderr = client.exec_command(
-    'sudo /usr/sbin/useradd ' + args.username + ' ' + useraddOptions)
 
-exit_status = stdout.channel.recv_exit_status()
-if exit_status != 0:
-    print(stderr.read().decode('utf-8'))
-    sys.exit(-1)
-    client.close()
+# helper function to run command and wait for output
+def run(client, command):
+    _, stdout, stderr = client.exec_command(command)
+    exit_status = stdout.channel.recv_exit_status()
+    if exit_status != 0:
+        print(stderr.read().decode('utf-8'))
+        client.close()
+        sys.exit(-1)
+    return stdout.read().decode('utf-8')
+
+
+# assuming user has sudo permission
+run(client, 'sudo /usr/sbin/useradd ' + args.username + ' ' + useraddOptions)
 
 # get home directory so we can upload ssh public key
-_, stdout, stderr = client.exec_command('eval echo ~'+args.username)
-exit_status = stdout.channel.recv_exit_status()
-if exit_status != 0:
-    print(stderr.read().decode('utf-8'))
-    sys.exit(-1)
-    client.close()
-userHome = stdout.read().decode('utf-8').strip()
+userHome = run(client, 'eval echo ~'+args.username).strip()
 
 # upload ssh pubilc key
 if args.key:
@@ -111,10 +110,18 @@ if args.key:
     #     client.close()
 
     sftp = client.open_sftp()
-    sftp.mkdir(userHome + '/.ssh')
-    sftp.chdir(userHome + '/.ssh')
-    sftp.put(args.key, 'authorized')
+    sshDir = userHome + '/.ssh'
+    authorizedKeysPath = sshDir+'/authorized_keys'
+    run(client, 'sudo mkdir ' + sshDir)
+    run(client, 'sudo chown ' + args.username + ' ' + sshDir)
+    run(client, 'sudo chmod 700 ' + sshDir)
+    tmpPath = '/tmp/' + 'authorized_keys.'+args.username
+    sftp.put(args.key, tmpPath)
+    sftp.put(args.key, tmpPath)
+    run(client, 'sudo mv ' + tmpPath + ' ' + authorizedKeysPath)
+    run(client, 'sudo chown ' + args.username + ' ' + authorizedKeysPath)
+    run(client, 'sudo chmod 600 ' + authorizedKeysPath)
 
-print('hi')
+print('done')
 client.close()
 sys.exit(0)
